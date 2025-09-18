@@ -1,42 +1,84 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <title>Zahlenraten-Spiel</title>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-    input { padding: 5px; font-size: 16px; }
-    button { padding: 5px 10px; font-size: 16px; }
-    p { font-size: 18px; }
-  </style>
+<meta charset="UTF-8">
+<title>Monster Clicker Game</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    text-align: center;
+    background: linear-gradient(to bottom, #74ebd5, #ACB6E5);
+    color: #333;
+    padding: 20px;
+  }
+  h1 { color: #222; }
+  #monster {
+    width: 150px;
+    margin: 20px auto;
+    display: block;
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  #monster:hover { transform: scale(1.1); }
+  #stats {
+    font-size: 18px;
+    margin-top: 20px;
+  }
+  button {
+    padding: 10px 20px;
+    font-size: 16px;
+    margin: 10px;
+    cursor: pointer;
+    border-radius: 5px;
+    border: none;
+    background: #ff9a9e;
+    color: white;
+    transition: 0.3s;
+  }
+  button:hover { background: #fbc2eb; }
+</style>
 </head>
 <body>
-  <h1>Zahlenraten-Spiel</h1>
-  <p>Rate eine Zahl zwischen 1 und 100!</p>
-  <input type="number" id="guess" min="1" max="100">
-  <button onclick="checkGuess()">Raten</button>
-  <p id="result"></p>
 
-  <script>
-    const secretNumber = Math.floor(Math.random() * 100) + 1;
-    let attempts = 0;
+<h1>Monster Clicker Game</h1>
+<img id="monster" src="https://i.imgur.com/O6aZkXU.png" alt="Monster">
+<div id="stats">
+  <p>Punkte: <span id="points">0</span></p>
+  <p>Monster HP: <span id="monsterHP">50</span></p>
+</div>
+<button onclick="upgrade()">Upgrade (+1 Klick)</button>
 
-    function checkGuess() {
-      const guess = Number(document.getElementById('guess').value);
-      attempts++;
-      let resultText = '';
+<script>
+let points = 0;
+let monsterHP = 50;
+let clickPower = 1;
 
-      if (guess === secretNumber) {
-        resultText = `🎉 Richtig! Du hast die Zahl in ${attempts} Versuchen erraten.`;
-      } else if (guess < secretNumber) {
-        resultText = 'Zu niedrig! Versuch es nochmal.';
-      } else if (guess > secretNumber) {
-        resultText = 'Zu hoch! Versuch es nochmal.';
-      }
+const pointsDisplay = document.getElementById('points');
+const monsterHPDisplay = document.getElementById('monsterHP');
+const monsterImg = document.getElementById('monster');
 
-      document.getElementById('result').textContent = resultText;
-    }
-  </script>
+monsterImg.addEventListener('click', () => {
+  monsterHP -= clickPower;
+  if (monsterHP <= 0) {
+    points += 10;
+    monsterHP = 50 + Math.floor(points / 50) * 10; // Monster wird stärker
+    alert("Monster besiegt! +10 Punkte");
+  }
+  pointsDisplay.textContent = points;
+  monsterHPDisplay.textContent = monsterHP;
+});
+
+function upgrade() {
+  if (points >= 20) {
+    points -= 20;
+    clickPower += 1;
+    pointsDisplay.textContent = points;
+    alert("Upgrade gekauft! Klickschaden +1");
+  } else {
+    alert("Du hast nicht genug Punkte für das Upgrade!");
+  }
+}
+</script>
+
 </body>
 </html>
-
