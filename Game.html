@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Zahlenraten-Spiel</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+    input { padding: 5px; font-size: 16px; }
+    button { padding: 5px 10px; font-size: 16px; }
+    p { font-size: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Zahlenraten-Spiel</h1>
+  <p>Rate eine Zahl zwischen 1 und 100!</p>
+  <input type="number" id="guess" min="1" max="100">
+  <button onclick="checkGuess()">Raten</button>
+  <p id="result"></p>
+
+  <script>
+    const secretNumber = Math.floor(Math.random() * 100) + 1;
+    let attempts = 0;
+
+    function checkGuess() {
+      const guess = Number(document.getElementById('guess').value);
+      attempts++;
+      let resultText = '';
+
+      if (guess === secretNumber) {
+        resultText = `🎉 Richtig! Du hast die Zahl in ${attempts} Versuchen erraten.`;
+      } else if (guess < secretNumber) {
+        resultText = 'Zu niedrig! Versuch es nochmal.';
+      } else if (guess > secretNumber) {
+        resultText = 'Zu hoch! Versuch es nochmal.';
+      }
+
+      document.getElementById('result').textContent = resultText;
+    }
+  </script>
+</body>
+</html>
+
