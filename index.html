@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Match-3 Komplett</title>
+<title>Match-3 Komplett mit Musik</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
   body { margin:0; display:flex; flex-direction:column; align-items:center; font-family:Arial,sans-serif; background:#eee; }
@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<h1>Match-3 Komplett</h1>
+<h1>Match-3 Komplett mit Musik</h1>
 <canvas id="gameCanvas" width="360" height="360"></canvas>
 <div id="score">Punkte: 0</div>
 <button id="startButton">Spiel starten & Sound freigeben</button>
@@ -20,6 +20,7 @@
 <audio id="swapSound" src="swap.mp3"></audio>
 <audio id="matchSound" src="match.mp3"></audio>
 <audio id="shuffleSound" src="shuffle.mp3"></audio>
+<audio id="bgMusic" src="background.mp3" loop></audio>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
@@ -27,6 +28,7 @@ const ctx = canvas.getContext('2d');
 const swapSound = document.getElementById('swapSound');
 const matchSound = document.getElementById('matchSound');
 const shuffleSound = document.getElementById('shuffleSound');
+const bgMusic = document.getElementById('bgMusic');
 const startButton = document.getElementById('startButton');
 
 const rows = 6;
@@ -221,11 +223,16 @@ function startSelect(e){
   drawGrid();
 }
 
-// Button zum Freigeben des Sounds
+// Button zum Freigeben des Sounds & Musik
 startButton.addEventListener('click',()=>{
   swapSound.play().then(()=>swapSound.pause());
   matchSound.play().then(()=>matchSound.pause());
   shuffleSound.play().then(()=>shuffleSound.pause());
+
+  bgMusic.currentTime=0;
+  bgMusic.volume=0.3;
+  bgMusic.play();
+
   startButton.style.display='none';
   initGrid();
 });
