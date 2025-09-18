@@ -2,83 +2,96 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>Monster Clicker Game</title>
+<title>2D Jump & Run</title>
 <style>
-  body {
-    font-family: Arial, sans-serif;
-    text-align: center;
-    background: linear-gradient(to bottom, #74ebd5, #ACB6E5);
-    color: #333;
-    padding: 20px;
-  }
-  h1 { color: #222; }
-  #monster {
-    width: 150px;
-    margin: 20px auto;
-    display: block;
-    cursor: pointer;
-    transition: transform 0.1s;
-  }
-  #monster:hover { transform: scale(1.1); }
-  #stats {
-    font-size: 18px;
-    margin-top: 20px;
-  }
-  button {
-    padding: 10px 20px;
-    font-size: 16px;
-    margin: 10px;
-    cursor: pointer;
-    border-radius: 5px;
-    border: none;
-    background: #ff9a9e;
-    color: white;
-    transition: 0.3s;
-  }
-  button:hover { background: #fbc2eb; }
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  canvas { background: #87CEEB; display: block; margin: 0 auto; }
 </style>
 </head>
 <body>
-
-<h1>Monster Clicker Game</h1>
-<img id="monster" src="https://i.imgur.com/O6aZkXU.png" alt="Monster">
-<div id="stats">
-  <p>Punkte: <span id="points">0</span></p>
-  <p>Monster HP: <span id="monsterHP">50</span></p>
-</div>
-<button onclick="upgrade()">Upgrade (+1 Klick)</button>
+<canvas id="gameCanvas" width="800" height="400"></canvas>
 
 <script>
-let points = 0;
-let monsterHP = 50;
-let clickPower = 1;
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
 
-const pointsDisplay = document.getElementById('points');
-const monsterHPDisplay = document.getElementById('monsterHP');
-const monsterImg = document.getElementById('monster');
+// Spieler
+const player = {
+  x: 50,
+  y: 350,
+  width: 30,
+  height: 50,
+  color: 'red',
+  dy: 0,
+  gravity: 0.8,
+  jumpPower: -15,
+  onGround: false
+};
 
-monsterImg.addEventListener('click', () => {
-  monsterHP -= clickPower;
-  if (monsterHP <= 0) {
-    points += 10;
-    monsterHP = 50 + Math.floor(points / 50) * 10; // Monster wird stärker
-    alert("Monster besiegt! +10 Punkte");
+// Plattformen
+const platforms = [
+  {x: 0, y: 380, width: 800, height: 20},
+  {x: 200, y: 300, width: 100, height: 20},
+  {x: 400, y: 250, width: 150, height: 20},
+  {x: 600, y: 200, width: 100, height: 20},
+];
+
+// Steuerung
+let keys = {};
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+function gameLoop() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  // Spielerbewegung
+  if(keys['ArrowRight']) player.x += 5;
+  if(keys['ArrowLeft']) player.x -= 5;
+  if(keys[' '] && player.onGround) {
+    player.dy = player.jumpPower;
+    player.onGround = false;
   }
-  pointsDisplay.textContent = points;
-  monsterHPDisplay.textContent = monsterHP;
-});
-
-function upgrade() {
-  if (points >= 20) {
-    points -= 20;
-    clickPower += 1;
-    pointsDisplay.textContent = points;
-    alert("Upgrade gekauft! Klickschaden +1");
-  } else {
-    alert("Du hast nicht genug Punkte für das Upgrade!");
+  
+  // Schwerkraft
+  player.dy += player.gravity;
+  player.y += player.dy;
+  
+  // Kollision mit Plattformen
+  player.onGround = false;
+  for (let plat of platforms) {
+    if(player.x < plat.x + plat.width &&
+       player.x + player.width > plat.x &&
+       player.y + player.height < plat.y + 10 &&
+       player.y + player.height + player.dy > plat.y) {
+      player.y = plat.y - player.height;
+      player.dy = 0;
+      player.onGround = true;
+    }
   }
+  
+  // Bildschirmbegrenzung
+  if(player.y + player.height > canvas.height) {
+    player.y = canvas.height - player.height;
+    player.dy = 0;
+    player.onGround = true;
+  }
+  if(player.x < 0) player.x = 0;
+  if(player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+  
+  // Spieler zeichnen
+  ctx.fillStyle = player.color;
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+  
+  // Plattformen zeichnen
+  ctx.fillStyle = 'green';
+  for (let plat of platforms) {
+    ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+  }
+  
+  requestAnimationFrame(gameLoop);
 }
-</script>
 
+gameLoop();
+</script>
 </body>
 </html>
