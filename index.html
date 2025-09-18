@@ -2,96 +2,108 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>2D Jump & Run</title>
+<title>Match-3 Swap Sound Test</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
-  canvas { background: #87CEEB; display: block; margin: 0 auto; }
+  body { margin:0; display:flex; flex-direction:column; align-items:center; font-family:Arial,sans-serif; background:#eee; }
+  canvas { border:1px solid #333; margin-top:20px; touch-action: none; }
+  #score { font-size:20px; margin-top:10px; }
 </style>
 </head>
 <body>
-<canvas id="gameCanvas" width="800" height="400"></canvas>
+<h1>Match-3 Swap Sound Test</h1>
+<canvas id="gameCanvas" width="360" height="360"></canvas>
+<div id="score">Punkte: 0</div>
+
+<audio id="swapSound" src="swap.mp3"></audio>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const swapSound = document.getElementById('swapSound');
 
-// Spieler
-const player = {
-  x: 50,
-  y: 350,
-  width: 30,
-  height: 50,
-  color: 'red',
-  dy: 0,
-  gravity: 0.8,
-  jumpPower: -15,
-  onGround: false
-};
+const rows = 6;
+const cols = 6;
+const cellSize = canvas.width / cols;
+const colors = ['red','green','blue','yellow','orange','purple'];
 
-// Plattformen
-const platforms = [
-  {x: 0, y: 380, width: 800, height: 20},
-  {x: 200, y: 300, width: 100, height: 20},
-  {x: 400, y: 250, width: 150, height: 20},
-  {x: 600, y: 200, width: 100, height: 20},
-];
+let grid = [];
+let score = 0;
+let animating = false;
+const scoreEl = document.getElementById('score');
+let first = null;
 
-// Steuerung
-let keys = {};
-document.addEventListener('keydown', e => keys[e.key] = true);
-document.addEventListener('keyup', e => keys[e.key] = false);
-
-function gameLoop() {
+function drawGrid(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  
-  // Spielerbewegung
-  if(keys['ArrowRight']) player.x += 5;
-  if(keys['ArrowLeft']) player.x -= 5;
-  if(keys[' '] && player.onGround) {
-    player.dy = player.jumpPower;
-    player.onGround = false;
-  }
-  
-  // Schwerkraft
-  player.dy += player.gravity;
-  player.y += player.dy;
-  
-  // Kollision mit Plattformen
-  player.onGround = false;
-  for (let plat of platforms) {
-    if(player.x < plat.x + plat.width &&
-       player.x + player.width > plat.x &&
-       player.y + player.height < plat.y + 10 &&
-       player.y + player.height + player.dy > plat.y) {
-      player.y = plat.y - player.height;
-      player.dy = 0;
-      player.onGround = true;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      let item = grid[r][c];
+      ctx.fillStyle = item.color;
+      ctx.fillRect(item.x*cellSize, item.y*cellSize, cellSize-2, cellSize-2);
+      if(first && first[0]===r && first[1]===c){
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(item.x*cellSize+1, item.y*cellSize+1, cellSize-4, cellSize-4);
+      }
     }
   }
-  
-  // Bildschirmbegrenzung
-  if(player.y + player.height > canvas.height) {
-    player.y = canvas.height - player.height;
-    player.dy = 0;
-    player.onGround = true;
-  }
-  if(player.x < 0) player.x = 0;
-  if(player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-  
-  // Spieler zeichnen
-  ctx.fillStyle = player.color;
-  ctx.fillRect(player.x, player.y, player.width, player.height);
-  
-  // Plattformen zeichnen
-  ctx.fillStyle = 'green';
-  for (let plat of platforms) {
-    ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
-  }
-  
-  requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+function initGrid(){
+  grid=[];
+  for(let r=0;r<rows;r++){
+    let row=[];
+    for(let c=0;c<cols;c++){
+      row.push({color: colors[Math.floor(Math.random()*colors.length)], x:c, y:r});
+    }
+    grid.push(row);
+  }
+  drawGrid();
+}
+
+function animateSwap(r1,c1,r2,c2){
+  if(!animating) swapSound.play(); // Sound beim Swap
+  animating=true;
+  const item1 = grid[r1][c1];
+  const item2 = grid[r2][c2];
+  const frames=10; let step=0;
+  function stepSwap(){
+    step++;
+    let dx=(c2-c1)/frames; let dy=(r2-r1)/frames;
+    item1.x=c1+dx*step; item1.y=r1+dy*step;
+    item2.x=c2-dx*step; item2.y=r2-dy*step;
+    drawGrid();
+    if(step<frames) requestAnimationFrame(stepSwap);
+    else{
+      [item1.color,item2.color]=[item2.color,item1.color];
+      item1.x=c1; item1.y=r1; item2.x=c2; item2.y=r2;
+      drawGrid();
+      animating=false;
+    }
+  }
+  requestAnimationFrame(stepSwap);
+}
+
+// Auswahl
+canvas.addEventListener('mousedown', startSelect);
+canvas.addEventListener('touchstart', e=>{e.preventDefault(); startSelect(e.touches[0]);});
+
+function startSelect(e){
+  if(animating) return;
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((e.clientX - rect.left)/cellSize);
+  const r = Math.floor((e.clientY - rect.top)/cellSize);
+  if(!first) first=[r,c];
+  else {
+    const [r0,c0]=first;
+    if(Math.abs(r-r0)+Math.abs(c-c0)===1) animateSwap(r0,c0,r,c);
+    first=null;
+  }
+  drawGrid();
+}
+
+initGrid();
+drawGrid();
 </script>
 </body>
 </html>
