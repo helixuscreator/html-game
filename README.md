@@ -1,5 +1,3 @@
-# html-game
-
 # Peace Monkey
 
 **Peace Monkey** is a browser-based match-3 puzzle game. Players swap adjacent items on an 8×8 grid to create matches of three or more identical items. The game features smooth animations, sound effects, and a countdown timer to challenge your score.
