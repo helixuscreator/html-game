@@ -13,8 +13,8 @@
 
 **Controls:**
 
-* Click or tap an item to select
-* Swap with an adjacent item to create matches
+* Click on an item and then on a neighboring item to swap them.
+* Or swipe an item in the desired direction to swap it with the neighboring item.
 
 **Technologies:**
 
