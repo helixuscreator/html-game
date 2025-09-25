@@ -51,6 +51,7 @@
       background:transparent;
       z-index:2;
       display:none;
+      touch-action: none; /* wichtig: verhindert Scroll/Zoom während Drag auf Touch-Geräten */
     }
     #hud{
       position:absolute;
@@ -133,6 +134,12 @@
     let timerInterval = null;
     let gameEnded = false;
     let bgLoaded = false;
+
+    // Drag state
+    let dragging = false;
+    let dragStartCell = null;
+    let dragHover = null;
+    let lastAdjacent = null;
 
     /* ---------------------------
        Responsive resize
@@ -297,9 +304,9 @@
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (gameEnded) return;
 
-      for (let r = 0; r < ROWS; r++) {
+      for (let r = 0; r < ROWS; r++){
         if (!grid[r]) continue;
-        for (let c = 0; c < COLS; c++) {
+        for (let c = 0; c < COLS; c++){
           const item = grid[r][c];
           if (!item) continue;
 
@@ -495,31 +502,148 @@
     }
 
     /* ---------------------------
-       Klick / Touch Handler
+       Pointer (Klick/Touch/Drag) Handler
+       - Tap: wähle Item (wie zuvor)
+       - Tap auf benachbartes Item: tausche
+       - Ziehen und Loslassen auf benachbartes Item: tausche
        --------------------------- */
-    canvas.addEventListener('mousedown', e=>startSelect(e));
-    canvas.addEventListener('touchstart', e=>{
-      const t=e.touches[0];
-      const rect = canvas.getBoundingClientRect();
-      if(t.clientX>=rect.left && t.clientX<=rect.right && t.clientY>=rect.top && t.clientY<=rect.bottom){
-        e.preventDefault();
-        startSelect(t);
-      }
-    });
-
-    function startSelect(e){
+    canvas.addEventListener('pointerdown', e=>{
       if(gameEnded || animating) return;
+      e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const c = Math.floor((e.clientX-rect.left)/CELL);
       const r = Math.floor((e.clientY-rect.top)/CELL);
       if(r<0||r>=ROWS||c<0||c>=COLS) return;
-      if(!first) first=[r,c];
-      else{
-        const [r0,c0]=first;
-        if(Math.abs(r-r0)+Math.abs(c-c0)===1) animateSwap(r0,c0,r,c);
-        first=null;
+      dragging = true;
+      dragStartCell = [r,c];
+      dragHover = [r,c];
+      lastAdjacent = null; // reset last adjacent seen
+      try{ if(e.pointerId) canvas.setPointerCapture(e.pointerId); }catch(e){}
+      drawGrid();
+    });
+
+    canvas.addEventListener('pointermove', e=>{
+      if(!dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const c = Math.floor((e.clientX-rect.left)/CELL);
+      const r = Math.floor((e.clientY-rect.top)/CELL);
+      if(r<0||r>=ROWS||c<0||c>=COLS){ dragHover = null; drawGrid(); return; }
+      const [r0,c0] = dragStartCell || [r,c];
+      const dist = Math.abs(r-r0)+Math.abs(c-c0);
+      if(dist===1){
+        // nur hervorheben wenn direkt benachbart zum Startpunkt
+        dragHover = [r,c];
+        lastAdjacent = [r,c];
+      } else {
+        // entferne Hervorhebung, aber merke dir letztes benachbartes Feld, falls eines passiert ist
+        dragHover = null;
       }
       drawGrid();
+    });
+
+    canvas.addEventListener('pointerup', e=>{
+      if(!dragging) return;
+      dragging = false;
+      try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}
+      const rect = canvas.getBoundingClientRect();
+      const c = Math.floor((e.clientX-rect.left)/CELL);
+      const r = Math.floor((e.clientY-rect.top)/CELL);
+      dragHover = null;
+
+      // If released outside the grid, try the last adjacent cell as target.
+      let targetR = r, targetC = c;
+      if(r<0||r>=ROWS||c<0||c>=COLS){
+        if(lastAdjacent){
+          [targetR, targetC] = lastAdjacent;
+        } else {
+          drawGrid(); lastAdjacent = null; return;
+        }
+      }
+
+      const [r0,c0] = dragStartCell || [targetR,targetC];
+      const dist = Math.abs(targetR-r0)+Math.abs(targetC-c0);
+
+      if(dist===0){
+        // Tap: Auswahl wie zuvor
+        if(!first) first=[targetR,targetC];
+        else{
+          const [fr,fc] = first;
+          if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC);
+          first = null;
+        }
+      } else {
+        // Wenn die Freigabe nicht direkt auf ein benachbartes Feld erfolgte,
+        // dann benutze das zuletzt berührte benachbarte Feld (lastAdjacent),
+        // falls vorhanden.
+        let targetUseR = targetR, targetUseC = targetC;
+        if(Math.abs(targetR-r0)+Math.abs(targetC-c0)!==1){
+          if(lastAdjacent){ [targetUseR, targetUseC] = lastAdjacent; }
+        }
+        if(Math.abs(targetUseR-r0)+Math.abs(targetUseC-c0)===1){
+          animateSwap(r0,c0,targetUseR,targetUseC);
+        } else {
+          first = null;
+        }
+      }
+      lastAdjacent = null;
+      drawGrid();
+    });
+
+    canvas.addEventListener('pointercancel', e=>{
+      dragging = false; dragHover = null; lastAdjacent = null; try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}; drawGrid();
+    });
+
+    // Fallback für ältere Browser, die PointerEvents nicht unterstützen (ältere iOS/Android)
+    if(!window.PointerEvent){
+      canvas.addEventListener('touchstart', e=>{
+        if(gameEnded || animating) return;
+        e.preventDefault();
+        const t = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const c = Math.floor((t.clientX-rect.left)/CELL);
+        const r = Math.floor((t.clientY-rect.top)/CELL);
+        if(r<0||r>=ROWS||c<0||c>=COLS) return;
+        dragging = true; dragStartCell=[r,c]; dragHover=[r,c]; drawGrid();
+      });
+      canvas.addEventListener('touchmove', e=>{
+        if(!dragging) return;
+        e.preventDefault();
+        const t = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const c = Math.floor((t.clientX-rect.left)/CELL);
+        const r = Math.floor((t.clientY-rect.top)/CELL);
+        if(r<0||r>=ROWS||c<0||c>=COLS){ dragHover=null; drawGrid(); return; }
+        dragHover=[r,c]; drawGrid();
+      });
+      canvas.addEventListener('touchend', e=>{
+        if(!dragging) return;
+        e.preventDefault();
+        dragging=false;
+        const t = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        const c = Math.floor((t.clientX-rect.left)/CELL);
+        const r = Math.floor((t.clientY-rect.top)/CELL);
+        dragHover=null;
+
+        // If released outside the grid, try the last adjacent cell as target.
+        let targetR = r, targetC = c;
+        if(r<0||r>=ROWS||c<0||c>=COLS){
+          if(lastAdjacent){
+            [targetR,targetC]=lastAdjacent;
+          } else { drawGrid(); lastAdjacent=null; return; }
+        }
+
+        const [r0,c0] = dragStartCell || [targetR,targetC];
+        const dist = Math.abs(targetR-r0)+Math.abs(targetC-c0);
+        if(dist===0){ if(!first) first=[targetR,targetC]; else{ const [fr,fc]=first; if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC); first=null; } }
+        else {
+          let useR=targetR, useC=targetC;
+          if(Math.abs(targetR-r0)+Math.abs(targetC-c0)!==1){ if(lastAdjacent){ [useR,useC]=lastAdjacent; } }
+          if(Math.abs(useR-r0)+Math.abs(useC-c0)===1){ animateSwap(r0,c0,useR,useC); } else first=null;
+        }
+        lastAdjacent=null;
+        drawGrid();
+      });
     }
 
     /* ---------------------------
