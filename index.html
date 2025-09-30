@@ -51,7 +51,7 @@
       background:transparent;
       z-index:2;
       display:none;
-      touch-action: none; /* wichtig: verhindert Scroll/Zoom während Drag auf Touch-Geräten */
+      touch-action: none; /* verhindert Scroll/Zoom während Drag auf Touch-Geräten */
     }
     #hud{
       position:absolute;
@@ -95,10 +95,10 @@
   </div>
 
   <!-- Audio -->
-<audio id="plopSound" data-src="sound/plop.mp3" preload="none"></audio>
-<audio id="bgMusic" data-src="music/background.mp3" loop preload="none"></audio>
-<audio id="failSound" data-src="sound/failSound.mp3" preload="none"></audio>
-<audio id="endMusic" data-src="music/end.mp3" preload="none"></audio>
+  <audio id="plopSound" data-src="sound/plop.mp3" preload="none"></audio>
+  <audio id="bgMusic" data-src="music/background.mp3" loop preload="none"></audio>
+  <audio id="failSound" data-src="sound/failSound.mp3" preload="none"></audio>
+  <audio id="endMusic" data-src="music/end.mp3" preload="none"></audio>
 
 
   <script>
@@ -125,11 +125,11 @@
     let CANVAS_SIZE = 360;
     let CELL = CANVAS_SIZE / COLS;
     const imageSources = [
-  "pictures/items/item1.png",
-  "pictures/items/item2.png",
-  "pictures/items/item3.png",
-  "pictures/items/item4.png"
-];
+      "pictures/items/item1.png",
+      "pictures/items/item2.png",
+      "pictures/items/item3.png",
+      "pictures/items/item4.png"
+    ];
 
     let images = [];
 
@@ -185,7 +185,6 @@
 
     /* ---------------------------
        Audiodateien prüfen und nur verfügbar machen, wenn erreichbar
-       verhindert console/network-errors beim Öffnen der Konsole
        --------------------------- */
     async function preloadAudios(list){
       // list: [{id:'plopSound', src:'plop.mp3'}, ...] — oder Element-IDs aus DOM lesen
@@ -202,8 +201,6 @@
               const resp = await fetch(url, { method: 'HEAD', cache: 'no-cache' });
               ok = resp && resp.ok;
             } catch(e) {
-              // HEAD eventuell nicht erlaubt -> GET mit Range minimaler Datenmenge kann problematisch.
-              // Als robuste Fallback-Lösung probieren wir GET, aber abbrechen, sobald Status vorliegt.
               try {
                 const resp2 = await fetch(url, { method: 'GET', cache: 'no-cache' });
                 ok = resp2 && resp2.ok;
@@ -212,12 +209,9 @@
               }
             }
             if(ok){
-              // erst jetzt die src setzen, damit der Browser nicht beim Laden automatisch Fehler loggt
               el.src = url;
               el.dataset.available = 'true';
-              // optional vorladen
               try { el.preload = 'auto'; } catch(e){}
-              // Fehler-Event behandeln: falls später trotzdem ein Ladefehler passiert, entfernen wir src
               el.addEventListener('error', ()=>{
                 el.dataset.available = 'false';
                 try{ el.removeAttribute('src'); el.load(); }catch(e){}
@@ -235,7 +229,7 @@
     }
 
     /* ---------------------------
-       Bilder vorladen mit Platzhalter-Fallback (wie zuvor)
+       Bilder vorladen mit Platzhalter-Fallback
        --------------------------- */
     async function preloadImages(list){
       startButton.disabled = true;
@@ -286,7 +280,7 @@
     initResources();
 
     /* ---------------------------
-       Grid / Spiel-Logik (wie zuvor, nur Sound-Play-Aufrufe abgesichert)
+       Grid / Spiel-Logik
        --------------------------- */
     function initGrid(){
       do {
@@ -510,9 +504,6 @@
 
     /* ---------------------------
        Pointer (Klick/Touch/Drag) Handler
-       - Tap: wähle Item (wie zuvor)
-       - Tap auf benachbartes Item: tausche
-       - Ziehen und Loslassen auf benachbartes Item: tausche
        --------------------------- */
     canvas.addEventListener('pointerdown', e=>{
       if(gameEnded || animating) return;
@@ -563,6 +554,7 @@
         if(lastAdjacent){
           [targetR, targetC] = lastAdjacent;
         } else {
+          first = null; // <-- Reset Auswahl wenn Release komplett außerhalb
           drawGrid(); lastAdjacent = null; return;
         }
       }
@@ -576,7 +568,7 @@
         else{
           const [fr,fc] = first;
           if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC);
-          first = null;
+          first = null; // <-- Reset Auswahl nach Tap
         }
       } else {
         // Wenn die Freigabe nicht direkt auf ein benachbartes Feld erfolgte,
@@ -589,7 +581,7 @@
         if(Math.abs(targetUseR-r0)+Math.abs(targetUseC-c0)===1){
           animateSwap(r0,c0,targetUseR,targetUseC);
         } else {
-          first = null;
+          first = null; // <-- Reset Auswahl wenn kein gültiger Zug
         }
       }
       lastAdjacent = null;
@@ -597,7 +589,7 @@
     });
 
     canvas.addEventListener('pointercancel', e=>{
-      dragging = false; dragHover = null; lastAdjacent = null; try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}; drawGrid();
+      dragging = false; dragHover = null; lastAdjacent = null; first = null; try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}; drawGrid();
     });
 
     // Fallback für ältere Browser, die PointerEvents nicht unterstützen (ältere iOS/Android)
@@ -637,7 +629,7 @@
         if(r<0||r>=ROWS||c<0||c>=COLS){
           if(lastAdjacent){
             [targetR,targetC]=lastAdjacent;
-          } else { drawGrid(); lastAdjacent=null; return; }
+          } else { first = null; drawGrid(); lastAdjacent=null; return; }
         }
 
         const [r0,c0] = dragStartCell || [targetR,targetC];
@@ -672,11 +664,14 @@
           a.animX=a.col; a.animY=a.row; b.animX=b.col; b.animY=b.row;
           drawGrid();
           const matched=findMatches();
-          if(matched.length>0) resolveMatches();
+          if(matched.length>0) {
+            resolveMatches();
+            first = null; // <-- Reset Auswahl nach gültigem Swap
+          }
           else{
             safePlay(failSound, {reset:true, volume:1});
             swapData(r1,c1,r2,c2);
-            animateRevert(a,b,startA,startB,()=>{animating=false; drawGrid();});
+            animateRevert(a,b,startA,startB,()=>{animating=false; first = null; drawGrid();}); // <-- Reset nach Revert
           }
         }
       }
