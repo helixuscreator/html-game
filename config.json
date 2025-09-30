@@ -1,0 +1,18 @@
+{
+  "cols": 6,
+  "rows": 6,
+  "items": [
+    "pictures/items/item1.png",
+    "pictures/items/item2.png",
+    "pictures/items/item3.png",
+    "pictures/items/item4.png"
+  ],
+  "bg": "pictures/background/floatingMonkey.png",
+  "sounds": {
+    "plop": "sound/plop.mp3",
+    "fail": "sound/failSound.mp3",
+    "end": "music/end.mp3"
+  },
+  "music": "music/background.mp3",
+  "timer": 120
+}
