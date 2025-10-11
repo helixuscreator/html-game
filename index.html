@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<title>Peace Monkey - Vollständig</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+:root{--board-size:450px;--canvas-size:360px;--amplitude:20px;--duration:4s;}
+html,body{margin:0;padding:0;width:100%;height:100%;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Arial,sans-serif;}
+#board{position:relative;width:var(--board-size);height:var(--board-size);overflow:hidden;}
+#bgOverlay{position:absolute;left:50%;top:50%;width:100%;height:100%;transform:translate(-50%,-50%);object-fit:cover;z-index:1;pointer-events:none;display:none;animation: floatY var(--duration) ease-in-out infinite;}
+@keyframes floatY{0%{transform:translate(-50%,-50%) translateY(calc(-1*var(--amplitude)));}50%{transform:translate(-50%,-50%) translateY(var(--amplitude));}100%{transform:translate(-50%,-50%) translateY(calc(-1*var(--amplitude)));}}
+#gameCanvas{position:absolute;left:50%;top:50%;width:var(--canvas-size);height:var(--canvas-size);transform:translate(-50%,-50%);background:transparent;z-index:2;display:none;touch-action:none;}
+#hud{position:absolute;top:10px;left:0;right:0;display:flex;justify-content:space-between;padding:0 10px;font-size:20px;color:#fff;z-index:4;user-select:none;pointer-events:none;display:none;}
+#endScore{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:42px;color:gold;display:none;text-align:center;z-index:5;pointer-events:none;}
+#controls{z-index:6;text-align:center;margin-top:15px;}
+#startButton{font-size:16px;padding:10px 20px;color:#fff;background:#222;border:none;cursor:pointer;}
+</style>
+</head>
+<body>
+  <div id="board">
+    <img id="bgOverlay" alt="Hintergrund">
+    <canvas id="gameCanvas" width="360" height="360"></canvas>
+    <div id="hud"><div id="timer">Zeit: 02:00</div><div id="score">Punkte: 0</div></div>
+    <div id="endScore"></div>
+  </div>
+  <div id="controls"><button id="startButton" disabled>Ressourcen laden…</button></div>
+
+<script>
+/* === Fallback config (wird nur genutzt, wenn game.config fehlt) === */
+const CONFIG_FALLBACK = {
+  cols: 6, rows: 6, items: [], bg: "", sounds: {}, music: "", timer: 120
+};
+
+/* === DOM & State === */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = true;
+const startButton = document.getElementById('startButton');
+const scoreEl = document.getElementById('score');
+const timerEl = document.getElementById('timer');
+const hud = document.getElementById('hud');
+const endScoreEl = document.getElementById('endScore');
+const bgOverlay = document.getElementById('bgOverlay');
+
+let CONFIG = {...CONFIG_FALLBACK};
+let configExists = false;
+let images = [], grid = [];
+let COLS = CONFIG.cols, ROWS = CONFIG.rows;
+let CANVAS_SIZE = 360, CELL = CANVAS_SIZE / COLS;
+let score = 0, animating = false, first = null, timer = CONFIG.timer, timerInterval = null, gameEnded = false;
+let dragging = false, dragStartCell = null, dragHover = null, lastAdjacent = null;
+
+/* === safePlay: spielt nur wenn audio.dataset.available==='true' === */
+function safePlay(audioEl,{reset=true,volume=null}={}){ if(!audioEl) return; if(audioEl.dataset.available!=='true') return; try{ if(reset) audioEl.currentTime=0; if(volume!==null) audioEl.volume=volume; const p=audioEl.play(); if(p && p.catch) p.catch(()=>{}); }catch(e){} }
+
+/* === Lade nur game.config; wenn fehlt => zwingender Fallback (keine externen loads) === */
+async function loadConfigFile(){
+  try{
+    const r = await fetch('config.json',{cache:'no-cache'});
+    if(!r.ok) throw new Error('no config');
+    const txt = await r.text();
+    if(!txt) throw new Error('empty');
+    const parsed = JSON.parse(txt);
+    CONFIG = {...CONFIG_FALLBACK,...parsed};
+    configExists = true;
+  }catch(e){
+    CONFIG = {...CONFIG_FALLBACK};
+    configExists = false;
+    console.warn('game.config nicht gefunden/ungültig — benutze Fallback (keine externen Bilder/Sounds).');
+  }
+  COLS = CONFIG.cols; ROWS = CONFIG.rows;
+}
+
+/* === preloadImages: wenn config fehlt oder items leer -> Platzhalter (dein Fallback) === */
+async function preloadImages(list){
+  startButton.disabled = true; startButton.textContent = "Ressourcen laden…";
+  if(!configExists || !list || list.length===0){
+    const count = Math.max(4, COLS);
+    images = [];
+    const colors = ['#c44','#49c','#4a4','#cc4','#c95','#5ac'];
+    for(let i=0;i<count;i++){
+      const p = document.createElement('canvas'); p.width=p.height=100;
+      const cp = p.getContext('2d'); cp.fillStyle = colors[i%colors.length]; cp.fillRect(0,0,100,100);
+      images.push(p);
+    }
+    return;
+  }
+  images = await Promise.all(list.map((src,i)=>new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>resolve(img);
+    img.onerror = ()=>{
+      const colors = ['red','blue','green','yellow'];
+      const c = colors[i%colors.length];
+      const ph = document.createElement('canvas'); ph.width=ph.height=100;
+      const phc = ph.getContext('2d'); phc.fillStyle=c; phc.fillRect(0,0,100,100);
+      resolve(ph);
+    };
+    img.src = src;
+  })));
+}
+
+/* === preloadAudios: nur aufrufen wenn configExists === true === */
+async function preloadAudios(audioMap){
+  const elMap = {};
+  for(const k of Object.keys(audioMap||{})){
+    const url = audioMap[k];
+    const a = document.createElement('audio');
+    a.dataset.src = url; a.dataset.available = 'false'; a.preload='none'; a.setAttribute('data-role',k);
+    document.body.appendChild(a);
+    elMap[k]=a;
+  }
+  const checks = Object.values(elMap).map(async el=>{
+    const url = el.dataset.src; if(!url) return;
+    try{
+      let ok=false;
+      try{ const r = await fetch(url,{method:'HEAD',cache:'no-cache'}); ok = r && r.ok; }catch(e){ try{ const r2 = await fetch(url,{method:'GET',cache:'no-cache'}); ok = r2 && r2.ok; }catch(e2){ ok=false; } }
+      if(ok){ el.src = url; el.dataset.available='true'; try{ el.preload='auto'; }catch(e){}; el.addEventListener('error', ()=>{ el.dataset.available='false'; try{ el.removeAttribute('src'); el.load(); }catch(e){} }); }
+      else el.dataset.available='false';
+    }catch(e){ el.dataset.available='false'; }
+  });
+  await Promise.all(checks);
+  return elMap;
+}
+
+/* === Resize / canvas === */
+function resizeGame(){
+  const board = document.getElementById('board');
+  const size = Math.min(window.innerWidth, window.innerHeight);
+  board.style.width = board.style.height = size+"px";
+  document.documentElement.style.setProperty('--board-size', size+"px");
+  CANVAS_SIZE = size*0.8;
+  CELL = CANVAS_SIZE / COLS;
+  canvas.width = canvas.height = CANVAS_SIZE;
+  document.documentElement.style.setProperty('--canvas-size', CANVAS_SIZE+"px");
+  drawGrid();
+}
+window.addEventListener('resize', resizeGame);
+
+/* === Grid / Draw / Matches === */
+function initGrid(){
+  do{
+    grid = [];
+    for(let r=0;r<ROWS;r++){
+      const row=[];
+      for(let c=0;c<COLS;c++){
+        let available = images.map((_,i)=>i);
+        if(c>=2 && row[c-1].imgIndex === row[c-2].imgIndex) available = available.filter(i=>i!==row[c-1].imgIndex);
+        if(r>=2 && grid[r-1] && grid[r-2] && grid[r-1][c].imgIndex === grid[r-2][c].imgIndex) available = available.filter(i=>i!==grid[r-1][c].imgIndex);
+        const idx = available[Math.floor(Math.random()*available.length)];
+        row.push({imgIndex:idx,row:r,col:c,animX:c,animY:r,removed:false});
+      }
+      grid.push(row);
+    }
+  } while(findMatches().length>0 || !hasMoves());
+}
+
+function drawGrid(shrinkMap={}){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(gameEnded) return;
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const item = grid[r][c]; if(!item) continue;
+      let size = CELL - 2;
+      if(first && first[0]===r && first[1]===c && !animating) size *= 0.8;
+      if(shrinkMap[`${r}_${c}`]) size *= shrinkMap[`${r}_${c}`];
+      const x = item.animX * CELL + (CELL - size)/2;
+      const y = item.animY * CELL + (CELL - size)/2;
+      try{ ctx.drawImage(images[item.imgIndex], x, y, size, size); }catch(e){ ctx.fillStyle='#f0f'; ctx.fillRect(x,y,size,size); }
+    }
+  }
+}
+
+function findMatches(){
+  const matched=[];
+  for(let r=0;r<ROWS;r++){
+    let count=1;
+    for(let c=1;c<COLS;c++){
+      if(grid[r][c].imgIndex===grid[r][c-1].imgIndex) count++; else { if(count>=3) for(let k=0;k<count;k++) matched.push([r,c-1-k]); count=1; }
+    }
+    if(count>=3) for(let k=0;k<count;k++) matched.push([r,COLS-1-k]);
+  }
+  for(let c=0;c<COLS;c++){
+    let count=1;
+    for(let r=1;r<ROWS;r++){
+      if(grid[r][c].imgIndex===grid[r-1][c].imgIndex) count++; else { if(count>=3) for(let k=0;k<count;k++) matched.push([r-1-k,c]); count=1; }
+    }
+    if(count>=3) for(let k=0;k<count;k++) matched.push([ROWS-1-k,c]);
+  }
+  return matched;
+}
+
+function swapData(r1,c1,r2,c2){ const t = grid[r1][c1].imgIndex; grid[r1][c1].imgIndex = grid[r2][c2].imgIndex; grid[r2][c2].imgIndex = t; }
+
+function hasMoves(){
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(c<COLS-1){ swapData(r,c,r,c+1); if(findMatches().length>0){ swapData(r,c,r,c+1); return true;} swapData(r,c,r,c+1); }
+      if(r<ROWS-1){ swapData(r,c,r+1,c); if(findMatches().length>0){ swapData(r,c,r+1,c); return true;} swapData(r,c,r+1,c); }
+    }
+  }
+  return false;
+}
+
+/* === Resolve Matches / Fall / Shuffle === */
+function resolveMatches(){
+  if(gameEnded) return;
+  const matched = findMatches();
+  if(matched.length===0){ fallItems(()=>{ if(!hasMoves()) shuffleExistingItems(); }); return; }
+  const plop = document.querySelector('audio[data-role="plop"]');
+  if(plop) safePlay(plop,{reset:true,volume:1});
+  animating = true;
+  const shrinkMap = {}; const counted = {};
+  matched.forEach(([r,c])=>{ counted[`${r}_${c}`]=true; });
+  const gained = Object.keys(counted).length;
+  score += gained; scoreEl.textContent = `Punkte: ${score}`;
+  Object.keys(counted).forEach(key=>{ const [r,c]=key.split('_').map(Number); shrinkMap[key]=1; grid[r][c].removed = true; });
+  function step(){
+    let done=true;
+    for(const k in shrinkMap){ shrinkMap[k]-=0.06; if(shrinkMap[k]>0) done=false; }
+    drawGrid(shrinkMap);
+    if(!done) requestAnimationFrame(step); else fallItems(resolveMatches);
+  }
+  step();
+}
+
+function fallItems(callback){
+  for(let c=0;c<COLS;c++){
+    let write = ROWS-1;
+    for(let r=ROWS-1;r>=0;r--){
+      if(!grid[r][c].removed){
+        if(write!==r){ grid[write][c].imgIndex = grid[r][c].imgIndex; grid[write][c].animY = r; }
+        write--;
+      }
+    }
+    for(let r=write;r>=0;r--){ grid[r][c].imgIndex = Math.floor(Math.random()*images.length); grid[r][c].animY = -(ROWS - r); }
+    for(let r=0;r<ROWS;r++) grid[r][c].removed=false;
+  }
+  animateFalling(callback);
+}
+
+function animateFalling(cb){
+  animating = true;
+  const duration = 300; const start = performance.now();
+  const starts = grid.map(row=>row.map(item=>item.animY));
+  function step(ts){
+    const t = Math.min((ts-start)/duration,1); const ease = t*t;
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ const item = grid[r][c]; item.animY = starts[r][c]*(1-ease) + item.row*ease; }
+    drawGrid();
+    if(t<1) requestAnimationFrame(step); else { for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) grid[r][c].animY = grid[r][c].row; animating=false; if(cb) cb(); }
+  }
+  requestAnimationFrame(step);
+}
+
+function shuffleExistingItems(){
+  animating = true;
+  let indices = [];
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) indices.push(grid[r][c].imgIndex);
+  let attempt=0;
+  do{
+    attempt++;
+    let shuffled=[...indices];
+    for(let i=shuffled.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]]; }
+    let k=0;
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) grid[r][c].imgIndex = shuffled[k++];
+  }while((findMatches().length>0 || !hasMoves()) && attempt<100);
+  drawGrid(); animating=false;
+}
+
+/* === Timer / UI === */
+function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `Zeit: ${m}:${sec}`; }
+function startTimer(){ timer = CONFIG.timer || 120; gameEnded=false; score=0; scoreEl.textContent=`Punkte: ${score}`; timerEl.textContent=formatTime(timer); canvas.style.display='block'; startButton.style.display='none'; timerInterval=setInterval(()=>{ timer--; timerEl.textContent=formatTime(timer); scoreEl.textContent=`Punkte: ${score}`; if(timer<=0){ clearInterval(timerInterval); finishGame(); } },1000); }
+function finishGame(){ gameEnded=true; canvas.style.display='none'; hud.style.display='none'; try{ document.querySelector('audio[data-role="bg"]')?.pause(); }catch(e){} try{ document.querySelector('audio[data-role="end"]')?.play(); }catch(e){} endScoreEl.textContent=`Punkte: ${score}`; endScoreEl.style.display='block'; }
+
+/* === Pointer / Touch Handlers === */
+canvas.addEventListener('pointerdown', e=>{
+  if(gameEnded || animating) return;
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((e.clientX-rect.left)/CELL);
+  const r = Math.floor((e.clientY-rect.top)/CELL);
+  if(r<0||r>=ROWS||c<0||c>=COLS) return;
+  dragging=true; dragStartCell=[r,c]; dragHover=[r,c]; lastAdjacent=null;
+  try{ if(e.pointerId) canvas.setPointerCapture(e.pointerId); }catch(e){}
+  drawGrid();
+});
+
+canvas.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((e.clientX-rect.left)/CELL);
+  const r = Math.floor((e.clientY-rect.top)/CELL);
+  if(r<0||r>=ROWS||c<0||c>=COLS){ dragHover=null; drawGrid(); return; }
+  const [r0,c0] = dragStartCell || [r,c];
+  const dist = Math.abs(r-r0)+Math.abs(c-c0);
+  if(dist===1){ dragHover=[r,c]; lastAdjacent=[r,c]; } else { dragHover=null; }
+  drawGrid();
+});
+
+canvas.addEventListener('pointerup', e=>{
+  if(!dragging) return;
+  dragging=false;
+  try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((e.clientX-rect.left)/CELL);
+  const r = Math.floor((e.clientY-rect.top)/CELL);
+  dragHover=null;
+  let targetR = r, targetC = c;
+  if(r<0||r>=ROWS||c<0||c>=COLS){
+    if(lastAdjacent){ [targetR,targetC] = lastAdjacent; } else { first=null; drawGrid(); lastAdjacent=null; return; }
+  }
+  const [r0,c0] = dragStartCell || [targetR,targetC];
+  const dist = Math.abs(targetR-r0)+Math.abs(targetC-c0);
+  if(dist===0){
+    if(!first) first=[targetR,targetC];
+    else{ const [fr,fc]=first; if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC); first=null; }
+  } else {
+    let targetUseR=targetR, targetUseC=targetC;
+    if(Math.abs(targetR-r0)+Math.abs(targetC-c0)!==1){ if(lastAdjacent){ [targetUseR,targetUseC]=lastAdjacent; } }
+    if(Math.abs(targetUseR-r0)+Math.abs(targetUseC-c0)===1){ animateSwap(r0,c0,targetUseR,targetUseC); } else first=null;
+  }
+  lastAdjacent=null; drawGrid();
+});
+
+canvas.addEventListener('pointercancel', e=>{ dragging=false; dragHover=null; lastAdjacent=null; first=null; try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}; drawGrid(); });
+
+if(!window.PointerEvent){
+  canvas.addEventListener('touchstart', e=>{ if(gameEnded||animating) return; e.preventDefault(); const t=e.touches[0]; const rect=canvas.getBoundingClientRect(); const c=Math.floor((t.clientX-rect.left)/CELL); const r=Math.floor((t.clientY-rect.top)/CELL); if(r<0||r>=ROWS||c<0||c>=COLS) return; dragging=true; dragStartCell=[r,c]; dragHover=[r,c]; drawGrid(); });
+  canvas.addEventListener('touchmove', e=>{ if(!dragging) return; e.preventDefault(); const t=e.touches[0]; const rect=canvas.getBoundingClientRect(); const c=Math.floor((t.clientX-rect.left)/CELL); const r=Math.floor((t.clientY-rect.top)/CELL); if(r<0||r>=ROWS||c<0||c>=COLS){ dragHover=null; drawGrid(); return; } dragHover=[r,c]; drawGrid(); });
+  canvas.addEventListener('touchend', e=>{ if(!dragging) return; e.preventDefault(); dragging=false; const t=e.changedTouches[0]; const rect=canvas.getBoundingClientRect(); const c=Math.floor((t.clientX-rect.left)/CELL); const r=Math.floor((t.clientY-rect.top)/CELL); dragHover=null; let targetR=r,targetC=c; if(r<0||r>=ROWS||c<0||c>=COLS){ if(lastAdjacent){ [targetR,targetC]=lastAdjacent; } else { first=null; drawGrid(); lastAdjacent=null; return; } } const [r0,c0]=dragStartCell||[targetR,targetC]; const dist=Math.abs(targetR-r0)+Math.abs(targetC-c0); if(dist===0){ if(!first) first=[targetR,targetC]; else{ const [fr,fc]=first; if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC); first=null; } } else { let useR=targetR,useC=targetC; if(Math.abs(targetR-r0)+Math.abs(targetC-c0)!==1){ if(lastAdjacent){ [useR,useC]=lastAdjacent; } } if(Math.abs(useR-r0)+Math.abs(useC-c0)===1){ animateSwap(r0,c0,useR,useC); } else first=null; } lastAdjacent=null; drawGrid(); });
+}
+
+/* === Swap / Revert Animation === */
+function animateSwap(r1,c1,r2,c2){
+  if(animating || gameEnded) return;
+  animating = true;
+  const a = grid[r1][c1], b = grid[r2][c2];
+  const startA = {x:a.animX, y:a.animY}, startB = {x:b.animX, y:b.animY};
+  const frames = 12; let step=0;
+  function stepAnim(){
+    step++; const t = step/frames;
+    a.animX = startA.x*(1-t) + startB.x*t; a.animY = startA.y*(1-t) + startB.y*t;
+    b.animX = startB.x*(1-t) + startA.x*t; b.animY = startB.y*(1-t) + startA.y*t;
+    drawGrid();
+    if(step<frames) requestAnimationFrame(stepAnim); else {
+      swapData(r1,c1,r2,c2);
+      a.animX = a.col; a.animY = a.row; b.animX = b.col; b.animY = b.row;
+      drawGrid();
+      const matched = findMatches();
+      if(matched.length>0){
+        const plop = document.querySelector('audio[data-role="plop"]'); if(plop) safePlay(plop,{reset:true,volume:1});
+        first = null;
+        resolveMatches();
+        animating = false;
+      } else {
+        const fail = document.querySelector('audio[data-role="fail"]'); if(fail) safePlay(fail,{reset:true,volume:1});
+        swapData(r1,c1,r2,c2);
+        animateRevert(a,b,startA,startB, ()=>{ animating = false; first = null; drawGrid(); });
+      }
+    }
+  }
+  requestAnimationFrame(stepAnim);
+}
+
+function animateRevert(aItem,bItem,origA,origB,cb){
+  const frames = 10; let step = 0;
+  const startA = {x:aItem.animX, y:aItem.animY}, startB = {x:bItem.animX, y:bItem.animY};
+  function s(){
+    step++; const t = step/frames;
+    aItem.animX = startA.x*(1-t) + origA.x*t; aItem.animY = startA.y*(1-t) + origA.y*t;
+    bItem.animX = startB.x*(1-t) + origB.x*t; bItem.animY = startB.y*(1-t) + origB.y*t;
+    drawGrid();
+    if(step<frames) requestAnimationFrame(s); else { aItem.animX=origA.x; aItem.animY=origA.y; bItem.animX=origB.x; bItem.animY=origB.y; if(cb) cb(); }
+  }
+  requestAnimationFrame(s);
+}
+
+/* === helper === */
+function resolveMatchesSafely(){ if(!animating && !gameEnded) resolveMatches(); }
+
+/* === Init resources, audios, start button === */
+async function initResources(){
+  startButton.disabled = true; startButton.textContent = "Ressourcen laden…";
+  await loadConfigFile();
+  COLS = CONFIG.cols; ROWS = CONFIG.rows;
+  // preload images (if config missing -> placeholders)
+  await preloadImages(CONFIG.items);
+  // preload audios only if config exists
+  const audioMap = {};
+  if(configExists){
+    if(CONFIG.sounds) { if(CONFIG.sounds.plop) audioMap.plop = CONFIG.sounds.plop; if(CONFIG.sounds.fail) audioMap.fail = CONFIG.sounds.fail; if(CONFIG.sounds.end) audioMap.end = CONFIG.sounds.end; }
+    if(CONFIG.music) audioMap.bg = CONFIG.music;
+  }
+  const created = await preloadAudios(audioMap);
+  // mark roles
+  for(const k in created){ created[k].setAttribute('data-role',k); }
+  // show bg only if config provided and url ok
+  if(configExists && CONFIG.bg){ bgOverlay.src = CONFIG.bg; bgOverlay.onload = ()=> bgOverlay.style.display='block'; bgOverlay.onerror = ()=> bgOverlay.style.display='none'; } else bgOverlay.style.display='none';
+  startButton.disabled = false; startButton.textContent = "Spiel starten"; startButton.style.display = 'inline-block';
+  startButton.onclick = ()=>{
+    hud.style.display='flex'; endScoreEl.style.display='none'; scoreEl.style.display='block'; timerEl.style.display='block';
+    const bg = document.querySelector('audio[data-role="bg"]'); if(bg && bg.dataset.available==='true'){ try{ bg.currentTime=0; bg.volume=0.4; safePlay(bg,{reset:true,volume:0.4}); }catch(e){} }
+    initGrid(); drawGrid(); startTimer();
+    setTimeout(()=>resolveMatchesSafely(),80);
+  };
+  resizeGame();
+}
+
+/* === Start on load === */
+window.addEventListener('load', ()=>{ initResources().catch(()=>{}); });
+
+</script>
+</body>
+</html>
