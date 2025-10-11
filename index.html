@@ -1,12 +1,12 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8" />
-<title>Peace Monkey - Vollständig</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Peace Monkey</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <style>
 :root{--board-size:450px;--canvas-size:360px;--amplitude:20px;--duration:4s;}
-html,body{margin:0;padding:0;width:100%;height:100%;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Arial,sans-serif;}
+html,body{margin:0;padding:0;width:100%;height:100%;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Arial,sans-serif;color:#fff;}
 #board{position:relative;width:var(--board-size);height:var(--board-size);overflow:hidden;}
 #bgOverlay{position:absolute;left:50%;top:50%;width:100%;height:100%;transform:translate(-50%,-50%);object-fit:cover;z-index:1;pointer-events:none;display:none;animation: floatY var(--duration) ease-in-out infinite;}
 @keyframes floatY{0%{transform:translate(-50%,-50%) translateY(calc(-1*var(--amplitude)));}50%{transform:translate(-50%,-50%) translateY(var(--amplitude));}100%{transform:translate(-50%,-50%) translateY(calc(-1*var(--amplitude)));}}
@@ -24,15 +24,20 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#000;display:flex
     <div id="hud"><div id="timer">Zeit: 02:00</div><div id="score">Punkte: 0</div></div>
     <div id="endScore"></div>
   </div>
-  <div id="controls"><button id="startButton" disabled>Ressourcen laden…</button></div>
+  <div id="controls">
+    <button id="startButton" disabled>Ressourcen laden…</button>
+  </div>
 
 <script>
-/* === Fallback config (wird nur genutzt, wenn game.config fehlt) === */
-const CONFIG_FALLBACK = {
-  cols: 6, rows: 6, items: [], bg: "", sounds: {}, music: "", timer: 120
-};
+/* ===========================
+   Vollständiger, ausführbarer Code
+   - Musik nur wenn in config.json vorhanden & erreichbar
+   - bg audio loop = true
+   - keine Hinweiszeile
+   =========================== */
 
-/* === DOM & State === */
+const CONFIG_FALLBACK = { cols: 6, rows: 6, items: [], bg: "", sounds: {}, music: "", timer: 120 };
+
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = true;
 const startButton = document.getElementById('startButton');
@@ -50,10 +55,9 @@ let CANVAS_SIZE = 360, CELL = CANVAS_SIZE / COLS;
 let score = 0, animating = false, first = null, timer = CONFIG.timer, timerInterval = null, gameEnded = false;
 let dragging = false, dragStartCell = null, dragHover = null, lastAdjacent = null;
 
-/* === safePlay: spielt nur wenn audio.dataset.available==='true' === */
 function safePlay(audioEl,{reset=true,volume=null}={}){ if(!audioEl) return; if(audioEl.dataset.available!=='true') return; try{ if(reset) audioEl.currentTime=0; if(volume!==null) audioEl.volume=volume; const p=audioEl.play(); if(p && p.catch) p.catch(()=>{}); }catch(e){} }
 
-/* === Lade nur game.config; wenn fehlt => zwingender Fallback (keine externen loads) === */
+/* --- load config.json --- */
 async function loadConfigFile(){
   try{
     const r = await fetch('config.json',{cache:'no-cache'});
@@ -63,15 +67,16 @@ async function loadConfigFile(){
     const parsed = JSON.parse(txt);
     CONFIG = {...CONFIG_FALLBACK,...parsed};
     configExists = true;
+    console.log('config geladen', CONFIG);
   }catch(e){
     CONFIG = {...CONFIG_FALLBACK};
     configExists = false;
-    console.warn('game.config nicht gefunden/ungültig — benutze Fallback (keine externen Bilder/Sounds).');
+    console.warn('config.json nicht gefunden/ungültig — benutze Fallback.');
   }
   COLS = CONFIG.cols; ROWS = CONFIG.rows;
 }
 
-/* === preloadImages: wenn config fehlt oder items leer -> Platzhalter (dein Fallback) === */
+/* --- preload images (fallback placeholders) --- */
 async function preloadImages(list){
   startButton.disabled = true; startButton.textContent = "Ressourcen laden…";
   if(!configExists || !list || list.length===0){
@@ -87,6 +92,7 @@ async function preloadImages(list){
   }
   images = await Promise.all(list.map((src,i)=>new Promise(resolve=>{
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = ()=>resolve(img);
     img.onerror = ()=>{
       const colors = ['red','blue','green','yellow'];
@@ -99,30 +105,34 @@ async function preloadImages(list){
   })));
 }
 
-/* === preloadAudios: nur aufrufen wenn configExists === true === */
+/* --- preloadAudios: set dataset.available only if canplaythrough fires --- */
 async function preloadAudios(audioMap){
   const elMap = {};
   for(const k of Object.keys(audioMap||{})){
     const url = audioMap[k];
     const a = document.createElement('audio');
-    a.dataset.src = url; a.dataset.available = 'false'; a.preload='none'; a.setAttribute('data-role',k);
+    a.dataset.src = url;
+    a.dataset.available = 'false';
+    a.preload = 'auto';
+    a.setAttribute('data-role', k);
+    a.crossOrigin = 'anonymous';
+    if(k === 'bg') a.loop = true;
+    if(url) a.src = url;
+    const onCan = ()=>{ a.dataset.available = 'true'; a.removeEventListener('canplaythrough', onCan); };
+    const onErr = ()=>{ a.dataset.available = 'false'; a.removeEventListener('error', onErr); };
+    a.addEventListener('canplaythrough', onCan);
+    a.addEventListener('error', onErr);
     document.body.appendChild(a);
-    elMap[k]=a;
+    elMap[k] = a;
+    // fallback timeout: mark unavailable if not ready in 3s
+    setTimeout(()=>{ if(a.dataset.available !== 'true') a.dataset.available = 'false'; }, 3000);
   }
-  const checks = Object.values(elMap).map(async el=>{
-    const url = el.dataset.src; if(!url) return;
-    try{
-      let ok=false;
-      try{ const r = await fetch(url,{method:'HEAD',cache:'no-cache'}); ok = r && r.ok; }catch(e){ try{ const r2 = await fetch(url,{method:'GET',cache:'no-cache'}); ok = r2 && r2.ok; }catch(e2){ ok=false; } }
-      if(ok){ el.src = url; el.dataset.available='true'; try{ el.preload='auto'; }catch(e){}; el.addEventListener('error', ()=>{ el.dataset.available='false'; try{ el.removeAttribute('src'); el.load(); }catch(e){} }); }
-      else el.dataset.available='false';
-    }catch(e){ el.dataset.available='false'; }
-  });
-  await Promise.all(checks);
+  // wait a short moment to allow canplaythrough events to fire
+  await new Promise(res=>setTimeout(res,350));
   return elMap;
 }
 
-/* === Resize / canvas === */
+/* --- Resize / Canvas --- */
 function resizeGame(){
   const board = document.getElementById('board');
   const size = Math.min(window.innerWidth, window.innerHeight);
@@ -136,7 +146,7 @@ function resizeGame(){
 }
 window.addEventListener('resize', resizeGame);
 
-/* === Grid / Draw / Matches === */
+/* --- Grid / Draw / Matches --- */
 function initGrid(){
   do{
     grid = [];
@@ -201,7 +211,7 @@ function hasMoves(){
   return false;
 }
 
-/* === Resolve Matches / Fall / Shuffle === */
+/* --- Resolve Matches / Fall / Shuffle --- */
 function resolveMatches(){
   if(gameEnded) return;
   const matched = findMatches();
@@ -266,12 +276,12 @@ function shuffleExistingItems(){
   drawGrid(); animating=false;
 }
 
-/* === Timer / UI === */
+/* --- Timer / UI --- */
 function formatTime(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const sec=(s%60).toString().padStart(2,'0'); return `Zeit: ${m}:${sec}`; }
 function startTimer(){ timer = CONFIG.timer || 120; gameEnded=false; score=0; scoreEl.textContent=`Punkte: ${score}`; timerEl.textContent=formatTime(timer); canvas.style.display='block'; startButton.style.display='none'; timerInterval=setInterval(()=>{ timer--; timerEl.textContent=formatTime(timer); scoreEl.textContent=`Punkte: ${score}`; if(timer<=0){ clearInterval(timerInterval); finishGame(); } },1000); }
-function finishGame(){ gameEnded=true; canvas.style.display='none'; hud.style.display='none'; try{ document.querySelector('audio[data-role="bg"]')?.pause(); }catch(e){} try{ document.querySelector('audio[data-role="end"]')?.play(); }catch(e){} endScoreEl.textContent=`Punkte: ${score}`; endScoreEl.style.display='block'; }
+function finishGame(){ gameEnded=true; canvas.style.display='none'; hud.style.display='none'; try{ const bg = document.querySelector('audio[data-role="bg"]'); if(bg){ bg.pause(); bg.currentTime = 0; } }catch(e){} try{ const end = document.querySelector('audio[data-role="end"]'); if(end && end.dataset.available==='true'){ end.currentTime = 0; end.play().catch(()=>{}); } }catch(e){} endScoreEl.textContent=`Punkte: ${score}`; endScoreEl.style.display='block'; }
 
-/* === Pointer / Touch Handlers === */
+/* --- Pointer / Touch Handlers --- */
 canvas.addEventListener('pointerdown', e=>{
   if(gameEnded || animating) return;
   e.preventDefault();
@@ -283,7 +293,6 @@ canvas.addEventListener('pointerdown', e=>{
   try{ if(e.pointerId) canvas.setPointerCapture(e.pointerId); }catch(e){}
   drawGrid();
 });
-
 canvas.addEventListener('pointermove', e=>{
   if(!dragging) return;
   const rect = canvas.getBoundingClientRect();
@@ -295,7 +304,6 @@ canvas.addEventListener('pointermove', e=>{
   if(dist===1){ dragHover=[r,c]; lastAdjacent=[r,c]; } else { dragHover=null; }
   drawGrid();
 });
-
 canvas.addEventListener('pointerup', e=>{
   if(!dragging) return;
   dragging=false;
@@ -320,7 +328,6 @@ canvas.addEventListener('pointerup', e=>{
   }
   lastAdjacent=null; drawGrid();
 });
-
 canvas.addEventListener('pointercancel', e=>{ dragging=false; dragHover=null; lastAdjacent=null; first=null; try{ if(e.pointerId) canvas.releasePointerCapture(e.pointerId); }catch(e){}; drawGrid(); });
 
 if(!window.PointerEvent){
@@ -329,7 +336,7 @@ if(!window.PointerEvent){
   canvas.addEventListener('touchend', e=>{ if(!dragging) return; e.preventDefault(); dragging=false; const t=e.changedTouches[0]; const rect=canvas.getBoundingClientRect(); const c=Math.floor((t.clientX-rect.left)/CELL); const r=Math.floor((t.clientY-rect.top)/CELL); dragHover=null; let targetR=r,targetC=c; if(r<0||r>=ROWS||c<0||c>=COLS){ if(lastAdjacent){ [targetR,targetC]=lastAdjacent; } else { first=null; drawGrid(); lastAdjacent=null; return; } } const [r0,c0]=dragStartCell||[targetR,targetC]; const dist=Math.abs(targetR-r0)+Math.abs(targetC-c0); if(dist===0){ if(!first) first=[targetR,targetC]; else{ const [fr,fc]=first; if(Math.abs(fr-targetR)+Math.abs(fc-targetC)===1) animateSwap(fr,fc,targetR,targetC); first=null; } } else { let useR=targetR,useC=targetC; if(Math.abs(targetR-r0)+Math.abs(targetC-c0)!==1){ if(lastAdjacent){ [useR,useC]=lastAdjacent; } } if(Math.abs(useR-r0)+Math.abs(useC-c0)===1){ animateSwap(r0,c0,useR,useC); } else first=null; } lastAdjacent=null; drawGrid(); });
 }
 
-/* === Swap / Revert Animation === */
+/* --- Swap / Revert Animations --- */
 function animateSwap(r1,c1,r2,c2){
   if(animating || gameEnded) return;
   animating = true;
@@ -374,39 +381,40 @@ function animateRevert(aItem,bItem,origA,origB,cb){
   requestAnimationFrame(s);
 }
 
-/* === helper === */
 function resolveMatchesSafely(){ if(!animating && !gameEnded) resolveMatches(); }
 
-/* === Init resources, audios, start button === */
+/* --- Init resources, audios, start button --- */
 async function initResources(){
   startButton.disabled = true; startButton.textContent = "Ressourcen laden…";
   await loadConfigFile();
   COLS = CONFIG.cols; ROWS = CONFIG.rows;
-  // preload images (if config missing -> placeholders)
   await preloadImages(CONFIG.items);
-  // preload audios only if config exists
+
   const audioMap = {};
   if(configExists){
-    if(CONFIG.sounds) { if(CONFIG.sounds.plop) audioMap.plop = CONFIG.sounds.plop; if(CONFIG.sounds.fail) audioMap.fail = CONFIG.sounds.fail; if(CONFIG.sounds.end) audioMap.end = CONFIG.sounds.end; }
+    if(CONFIG.sounds){ if(CONFIG.sounds.plop) audioMap.plop = CONFIG.sounds.plop; if(CONFIG.sounds.fail) audioMap.fail = CONFIG.sounds.fail; if(CONFIG.sounds.end) audioMap.end = CONFIG.sounds.end; }
     if(CONFIG.music) audioMap.bg = CONFIG.music;
   }
+
   const created = await preloadAudios(audioMap);
-  // mark roles
   for(const k in created){ created[k].setAttribute('data-role',k); }
-  // show bg only if config provided and url ok
+
   if(configExists && CONFIG.bg){ bgOverlay.src = CONFIG.bg; bgOverlay.onload = ()=> bgOverlay.style.display='block'; bgOverlay.onerror = ()=> bgOverlay.style.display='none'; } else bgOverlay.style.display='none';
-  startButton.disabled = false; startButton.textContent = "Spiel starten"; startButton.style.display = 'inline-block';
+
+  startButton.disabled = false; startButton.textContent = 'Spiel starten'; startButton.style.display = 'inline-block';
   startButton.onclick = ()=>{
     hud.style.display='flex'; endScoreEl.style.display='none'; scoreEl.style.display='block'; timerEl.style.display='block';
-    const bg = document.querySelector('audio[data-role="bg"]'); if(bg && bg.dataset.available==='true'){ try{ bg.currentTime=0; bg.volume=0.4; safePlay(bg,{reset:true,volume:0.4}); }catch(e){} }
+    const bg = document.querySelector('audio[data-role="bg"]');
+    if(bg && bg.dataset.available==='true'){
+      try{ bg.currentTime=0; bg.volume=0.4; bg.loop = true; safePlay(bg,{reset:true,volume:0.4}); }catch(e){ console.warn('bg play error', e); }
+    }
     initGrid(); drawGrid(); startTimer();
     setTimeout(()=>resolveMatchesSafely(),80);
   };
   resizeGame();
 }
 
-/* === Start on load === */
-window.addEventListener('load', ()=>{ initResources().catch(()=>{}); });
+window.addEventListener('load', ()=>{ initResources().catch(e=>console.warn('initResources failed',e)); });
 
 </script>
 </body>
